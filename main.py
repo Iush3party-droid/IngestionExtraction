@@ -1,31 +1,45 @@
 from langgraph.graph import StateGraph
 import requests
-from nodes.state import State
-from nodes.start_node import start_node
+from typing import Dict, Any, TypedDict, List
+from utils.fetchName import fetchName
+
+class State(TypedDict):
+    files: List[str] ## may contain file_names and file_ids
+
+def start_node(state: State) -> State:
+    file_names = fetchName()
+    state["files"] = List[file_names]
+    return state
 
 def search_files(state: State) -> State:
     """Search files in Google Drive (placeholder)"""
-    # TODO: integrate Google Drive API
-    found_files = ["fileA.pdf", "fileB.pdf"]
-    return {"files": found_files}
+    found_files = state.get("files")
+    state["files"] = found_files
+    return state
 
 def download_file(state: State) -> State:
     """Download file from Drive"""
     files = state.get("files", [])
     downloaded = [f"local/{f}" for f in files]  # placeholder paths
-    return {"downloaded_files": downloaded}
+    state["downloaded_files"] = downloaded
+    return state
 
 def upload_to_mistral(state: State) -> State:
     """Upload each file to Mistral server"""
     results = []
     for f in state.get("downloaded_files", []):
-        # Example API request
-        resp = requests.post(
-            "https://api.mistral.ai/v1/upload",
-            files={"file": open(f, "rb")}
-        )
-        results.append(resp.json())
-    return {"uploaded": results}
+        # Example API request (commented out to avoid actual API calls)
+        # resp = requests.post(
+        #     "https://api.mistral.ai/v1/upload",
+        #     files={"file": open(f, "rb")}
+        # )
+        # results.append(resp.json())
+        
+        # Mock response for testing
+        results.append({"file_id": f"mock_id_{f}", "signed_url": f"mock_url_{f}"})
+    
+    state["uploaded"] = results
+    return state
 
 def retrieve_signed_url(state: State) -> State:
     """Retrieve signed URLs for uploaded files"""
@@ -34,15 +48,21 @@ def retrieve_signed_url(state: State) -> State:
         # Example follow-up API call
         url = item.get("signed_url", "mock_url")
         signed_urls.append(url)
-    return {"signed_urls": signed_urls}
+    
+    state["signed_urls"] = signed_urls
+    return state
 
 def ocr_results(state: State) -> State:
     """Fetch OCR results from Mistral"""
     texts = []
     for url in state.get("signed_urls", []):
-        resp = requests.get(url)
-        texts.append(resp.text)
-    return {"ocr_texts": texts}
+        # Mock OCR response instead of actual API call
+        # resp = requests.get(url)
+        # texts.append(resp.text)
+        texts.append(f"OCR text from {url}")
+    
+    state["ocr_texts"] = texts
+    return state
 
 # -------- Graph Wiring --------
 workflow = StateGraph(State)
@@ -67,8 +87,11 @@ app = workflow.compile()
 if __name__ == "__main__":
     print("Starting LangGraph Workflow...")
     try:
-        result = app.invoke({})
+        # Initialize with empty state - the start_node will populate it
+        initial_state = {}
+        result = app.invoke(initial_state)
         print("Workflow completed successfully!")
+        print("Final state:", result)
         print("OCR Texts:", result.get("ocr_texts"))
         print("Files found:", result.get("files"))
     except Exception as e:

@@ -1,7 +1,6 @@
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from state import State
+from .state import State
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
