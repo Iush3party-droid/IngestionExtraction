@@ -3,7 +3,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 folder_name = "Medical Records"
 
-def fetchName():
+def fetchNameAndIds():
     """Entry point: trigger workflow execution"""
     # Google Drive API setup
     SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -43,6 +43,6 @@ def fetchName():
             print(f"No files found in '{folder_name}'")
 
     file_names = [file['name'] for file in items]
-    print(file_names)
+    file_ids = [file['id'] for file in items]
 
-    return file_names
+    return file_names, file_ids

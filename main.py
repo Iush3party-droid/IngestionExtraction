@@ -1,26 +1,46 @@
 from langgraph.graph import StateGraph
 import requests
-from typing import Dict, Any, TypedDict, List
-from utils.fetchName import fetchName
+from typing import TypedDict, List, Any, Dict
+from utils.fetchName import fetchNameAndIds
+import os
 
 class State(TypedDict):
-    files: List[str] ## may contain file_names and file_ids
+    files: List[str] ## contain file_names
+    files_id: List[str] ## contain file_ids
+    downloaded_files: List[str] ## contain local file paths
 
 def start_node(state: State) -> State:
-    file_names = fetchName()
-    state["files"] = List[file_names]
+    file_names, file_ids = fetchNameAndIds()
+    state["files"] = file_names
+    state["files_id"] = file_ids
     return state
 
-def search_files(state: State) -> State:
-    """Search files in Google Drive (placeholder)"""
-    found_files = state.get("files")
-    state["files"] = found_files
-    return state
 
-def download_file(state: State) -> State:
+def download_file(state: Dict[str, Any]) -> Dict[str, Any]:
     """Download file from Drive"""
+    file_ids = state.get("files_id", [])
     files = state.get("files", [])
-    downloaded = [f"local/{f}" for f in files]  # placeholder paths
+    downloaded = []
+    
+    for file_id, file_name in zip(file_ids, files):
+        # Download file from Google Drive using file_id
+        print(f"Downloading file: {file_name}")
+        url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        local_path = os.path.join("downloads", file_name)
+        
+        # Ensure "downloads" directory exists
+        os.makedirs("downloads", exist_ok=True)
+        
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(local_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+        
+        downloaded.append(local_path)
+        print(f"Successfully downloaded: {file_name}")
+
     state["downloaded_files"] = downloaded
     return state
 
@@ -68,15 +88,13 @@ def ocr_results(state: State) -> State:
 workflow = StateGraph(State)
 
 workflow.add_node("start", start_node)
-workflow.add_node("search_files", search_files)
 workflow.add_node("download", download_file)
 workflow.add_node("upload", upload_to_mistral)
 workflow.add_node("signed_url", retrieve_signed_url)
 workflow.add_node("ocr", ocr_results)
 
 workflow.set_entry_point("start")
-workflow.add_edge("start", "search_files")
-workflow.add_edge("search_files", "download")
+workflow.add_edge("start", "download")
 workflow.add_edge("download", "upload")
 workflow.add_edge("upload", "signed_url")
 workflow.add_edge("signed_url", "ocr")
