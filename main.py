@@ -4,12 +4,15 @@ from typing import TypedDict, List, Any, Dict
 from utils.fetchName import fetchNameAndIds
 import os
 import gdown
+import re
 
 class State(TypedDict):
     files: List[str] ## contain file_names
     files_id: List[str] ## contain file_ids
     downloaded_files: List[str] ## contain local file paths
     uploaded: List[Dict[str, Any]] ## contain uploaded file JSON responses
+    signed_urls: List[str] ## contain signed URLs
+    ocr_texts: List[Dict[str, Any]] ## contain OCR text JSON responses
 
 def start_node(state: State) -> State:
     file_names, file_ids = fetchNameAndIds()
@@ -72,18 +75,11 @@ def upload_to_mistral(state: State) -> State:
     for file_path, file_name in zip(downloaded_files, file_names):
         print(f"Uploading {file_name} to Mistral...")
 
-        print(f"\n\n{file_path}\n\n")
-
         with open(file_path, "rb") as file_obj:
             files = {"file": (file_name, file_obj)}  
             data = {"purpose": "ocr"}
 
             resp = requests.post(url, headers=headers, files=files, data=data)
-            
-            if resp.status_code != 200:
-                print(f"Upload failed for {file_name}: {resp.status_code} {resp.text}")
-                resp.raise_for_status()
-
             resp_json = resp.json()
             results.append(resp_json)
             print(f"Successfully uploaded {file_name}: {resp_json}")
@@ -91,29 +87,84 @@ def upload_to_mistral(state: State) -> State:
     state["uploaded"] = results
     return state
 
-def retrieve_signed_url(state: State) -> State:
-    """Retrieve signed URLs for uploaded files"""
+def retrieve_signed_url(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Retrieve signed URLs for uploaded files from Mistral AI API"""
     signed_urls = []
-    for item in state.get("uploaded", []):
-        # Example follow-up API call
-        url = item.get("signed_url", "mock_url")
-        signed_urls.append(url)
     
+    # Get API key from environment or state
+    api_key = state.get("mistral_api_key") or "LwjDmg6zCUPfm6eFEppoZcGBo8uYkdmU"
+    
+    for item in state.get("uploaded", []):
+        file_id = item.get("id")
+            
+        # Make API call to get signed URL
+        url = f"https://api.mistral.ai/v1/files/{file_id}/url"
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        # Extract signed URL from response
+        response_data = response.json()
+        signed_url = response_data.get("url")
+        
+        if signed_url:
+            signed_urls.append(signed_url)
     state["signed_urls"] = signed_urls
     return state
 
-def ocr_results(state: State) -> State:
-    """Fetch OCR results from Mistral"""
+def ocr_results(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Fetch OCR results from Mistral OCR API"""
     texts = []
-    for url in state.get("signed_urls", []):
-        # Mock OCR response instead of actual API call
-        # resp = requests.get(url)
-        # texts.append(resp.text)
-        texts.append(f"OCR text from {url}")
     
+    api_url = "https://api.mistral.ai/v1/ocr"
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer LwjDmg6zCUPfm6eFEppoZcGBo8uYkdmU"
+    }
+    
+    for url in state.get("signed_urls", []):
+        # Prepare the request payload
+        payload = {
+            "model": "mistral-ocr-latest",
+            "document": {
+                "type": "image_url",
+                "image_url": url
+            },
+            "include_image_base64": True
+        }
+        
+        # Make the API request
+        response = requests.post(api_url, json=payload, headers=headers)
+        
+        # Parse the response
+        result = response.json()
+        
+        # Extract the OCR text from the response
+        # Mistral OCR returns text in pages[].markdown format
+        if 'pages' in result and len(result['pages']) > 0:
+            # Combine text from all pages
+            ocr_text = ""
+            for page in result['pages']:
+                page_text = page.get('markdown', '')
+                clean_text = re.sub(r'!\[.*?\]\(.*?\)', '', page_text)
+                clean_text = re.sub(r'\|.*?\|', ' ', clean_text)
+                clean_text = re.sub(r'#{1,6}\s*', '', clean_text)
+                clean_text = re.sub(r'\s+', ' ', clean_text)
+                ocr_text += clean_text.strip() + " "
+            ocr_text = ocr_text.strip()
+        else:
+            ocr_text = result.get('text', '')
+        
+        print(ocr_text)
+        texts.append(ocr_text)
     state["ocr_texts"] = texts
     return state
-
 # -------- Graph Wiring --------
 workflow = StateGraph(State)
 
