@@ -3,11 +3,13 @@ import requests
 from typing import TypedDict, List, Any, Dict
 from utils.fetchName import fetchNameAndIds
 import os
+import gdown
 
 class State(TypedDict):
     files: List[str] ## contain file_names
     files_id: List[str] ## contain file_ids
     downloaded_files: List[str] ## contain local file paths
+    uploaded: List[Dict[str, Any]] ## contain uploaded file JSON responses
 
 def start_node(state: State) -> State:
     file_names, file_ids = fetchNameAndIds()
@@ -17,47 +19,75 @@ def start_node(state: State) -> State:
 
 
 def download_file(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Download file from Drive"""
+    """download method using gdown library"""
+
     file_ids = state.get("files_id", [])
     files = state.get("files", [])
     downloaded = []
     
+    # Ensure "downloads" directory exists
+    os.makedirs("downloads", exist_ok=True)
+    
     for file_id, file_name in zip(file_ids, files):
-        # Download file from Google Drive using file_id
-        print(f"Downloading file: {file_name}")
-        url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        print(f"Downloading file : {file_name}")
+
         local_path = os.path.join("downloads", file_name)
+        url = f"https://drive.google.com/uc?id={file_id}"
         
-        # Ensure "downloads" directory exists
-        os.makedirs("downloads", exist_ok=True)
+        gdown.download(url, local_path, quiet=False)
         
-        with requests.get(url, stream=True) as r:
-            r.raise_for_status()
-            with open(local_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-        
-        downloaded.append(local_path)
-        print(f"Successfully downloaded: {file_name}")
+        # Verify the file was downloaded correctly
+        if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+            # For PNG files, verify it's actually a PNG
+            if file_name.lower().endswith('.png'):
+                with open(local_path, 'rb') as f:
+                    header = f.read(8)
+                    png_signature = b'\x89PNG\r\n\x1a\n'
+                    if header.startswith(png_signature):
+                        downloaded.append(local_path)
+                        print(f"Successfully downloaded: {file_name}")
+                    else:
+                        print(f"Downloaded {file_name} is not a valid PNG file")
+                        os.remove(local_path)
+            else:
+                downloaded.append(local_path)
+                print(f"Successfully downloaded: {file_name}")
+        else:
+            print(f"Failed to download {file_name} - file not created or empty")
 
     state["downloaded_files"] = downloaded
     return state
 
 def upload_to_mistral(state: State) -> State:
-    """Upload each file to Mistral server"""
+    """Upload each PNG file in state['downloaded_files'] to Mistral server"""
     results = []
-    for f in state.get("downloaded_files", []):
-        # Example API request (commented out to avoid actual API calls)
-        # resp = requests.post(
-        #     "https://api.mistral.ai/v1/upload",
-        #     files={"file": open(f, "rb")}
-        # )
-        # results.append(resp.json())
-        
-        # Mock response for testing
-        results.append({"file_id": f"mock_id_{f}", "signed_url": f"mock_url_{f}"})
+    url = "https://api.mistral.ai/v1/files"
+    headers = {
+        "Authorization": f"Bearer {os.getenv('MISTRAL_API_KEY', 'LwjDmg6zCUPfm6eFEppoZcGBo8uYkdmU')}"
+    }
+
+    downloaded_files = state.get("downloaded_files", [])
+    file_names = state.get("files", [])
     
+    for file_path, file_name in zip(downloaded_files, file_names):
+        print(f"Uploading {file_name} to Mistral...")
+
+        print(f"\n\n{file_path}\n\n")
+
+        with open(file_path, "rb") as file_obj:
+            files = {"file": (file_name, file_obj)}  
+            data = {"purpose": "ocr"}
+
+            resp = requests.post(url, headers=headers, files=files, data=data)
+            
+            if resp.status_code != 200:
+                print(f"Upload failed for {file_name}: {resp.status_code} {resp.text}")
+                resp.raise_for_status()
+
+            resp_json = resp.json()
+            results.append(resp_json)
+            print(f"Successfully uploaded {file_name}: {resp_json}")
+
     state["uploaded"] = results
     return state
 
