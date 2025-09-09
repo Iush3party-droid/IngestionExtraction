@@ -1,13 +1,9 @@
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from state import State
 from googleapiclient.discovery import build
-from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+
 folder_name = "Medical Records"
 
-def start_node(state: State) -> State:
+def fetchName():
     """Entry point: trigger workflow execution"""
     # Google Drive API setup
     SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -30,7 +26,7 @@ def start_node(state: State) -> State:
     
     if not folders:
         print(f"No folder found with name: {folder_name}")
-        return {"files": []}  # Return empty list if no folder found
+        return []  # Return empty list if no folder found
     else:
         folder_id = folders[0]['id']
         print(f"Folder ID for '{folder_name}': {folder_id}")
@@ -45,12 +41,8 @@ def start_node(state: State) -> State:
         items = results.get('files', [])
         if not items:
             print(f"No files found in '{folder_name}'")
-        else:
-            for item in items:
-                print(f"{item['name']} ({item['id']})")
 
-    # Extract file names
     file_names = [file['name'] for file in items]
     print(file_names)
-    
-    return {"files": file_names}
+
+    return file_names
